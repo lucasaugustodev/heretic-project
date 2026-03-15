@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Heretic Chat</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0a0a0a;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: #111;
+      border-bottom: 1px solid #222;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 {
+      font-size: 18px;
+      color: #ff4444;
+      font-weight: 700;
+      letter-spacing: 2px;
+    }
+    header .status {
+      font-size: 12px;
+      color: #666;
+    }
+    header .status.online { color: #4caf50; }
+    .controls {
+      background: #111;
+      border-bottom: 1px solid #222;
+      padding: 8px 20px;
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      font-size: 13px;
+    }
+    .controls label { color: #888; }
+    .controls input, .controls select {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #ddd;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    .controls button {
+      background: #222;
+      border: 1px solid #444;
+      color: #ccc;
+      padding: 4px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .controls button:hover { background: #333; }
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .msg {
+      max-width: 80%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      line-height: 1.5;
+      font-size: 14px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: #1a3a5c;
+      border: 1px solid #2a4a6c;
+      color: #d0e8ff;
+    }
+    .msg.assistant {
+      align-self: flex-start;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #ddd;
+    }
+    .msg.system {
+      align-self: center;
+      background: #2a1a1a;
+      border: 1px solid #442;
+      color: #c96;
+      font-size: 12px;
+      max-width: 90%;
+    }
+    .msg .role {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      opacity: 0.6;
+    }
+    .typing {
+      align-self: flex-start;
+      color: #666;
+      font-size: 13px;
+      padding: 8px 16px;
+    }
+    .typing::after {
+      content: '...';
+      animation: dots 1s infinite;
+    }
+    @keyframes dots {
+      0%, 20% { content: '.'; }
+      40% { content: '..'; }
+      60%, 100% { content: '...'; }
+    }
+    #input-area {
+      background: #111;
+      border-top: 1px solid #222;
+      padding: 16px 20px;
+      display: flex;
+      gap: 12px;
+    }
+    #input-area textarea {
+      flex: 1;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #e0e0e0;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-family: inherit;
+      resize: none;
+      min-height: 48px;
+      max-height: 200px;
+    }
+    #input-area textarea:focus { outline: none; border-color: #ff4444; }
+    #input-area button {
+      background: #ff4444;
+      border: none;
+      color: white;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 600;
+      align-self: flex-end;
+    }
+    #input-area button:hover { background: #ff5555; }
+    #input-area button:disabled { background: #444; cursor: not-allowed; }
+    #chat::-webkit-scrollbar { width: 6px; }
+    #chat::-webkit-scrollbar-track { background: #0a0a0a; }
+    #chat::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>HERETIC CHAT</h1>
+    <span class="status" id="status">Checking...</span>
+  </header>
+  <div class="controls">
+    <label>System Prompt:</label>
+    <input type="text" id="system-prompt" placeholder="Optional system prompt..." style="flex:1">
+    <label>Temp:</label>
+    <input type="number" id="temperature" value="0.7" min="0" max="2" step="0.1" style="width:60px">
+    <label>Max:</label>
+    <input type="number" id="max-tokens" value="2048" min="64" max="4096" step="64" style="width:80px">
+    <button onclick="clearChat()">Clear</button>
+    <button onclick="exportChat()">Export</button>
+  </div>
+  <div id="chat"></div>
+  <div id="input-area">
+    <textarea id="input" placeholder="Type a message... (Shift+Enter for new line)" rows="1"></textarea>
+    <button id="send-btn" onclick="send()">Send</button>
+  </div>
+
+  <script>
+    const chatEl = document.getElementById("chat");
+    const inputEl = document.getElementById("input");
+    const sendBtn = document.getElementById("send-btn");
+    const statusEl = document.getElementById("status");
+    let messages = [];
+    let generating = false;
+
+    // Auto-resize textarea
+    inputEl.addEventListener("input", () => {
+      inputEl.style.height = "auto";
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 200) + "px";
+    });
+
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        if (!generating) send();
+      }
+    });
+
+    // Check API status
+    async function checkStatus() {
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: [{ role: "user", content: "test" }], max_tokens: 1 }),
+          signal: AbortSignal.timeout(5000),
+        });
+        statusEl.textContent = "Online - Mistral 7B Heretic 3x";
+        statusEl.className = "status online";
+      } catch {
+        statusEl.textContent = "API Offline";
+        statusEl.className = "status";
+      }
+    }
+    checkStatus();
+
+    function addMessage(role, content) {
+      const div = document.createElement("div");
+      div.className = `msg ${role}`;
+      const roleLabel = document.createElement("div");
+      roleLabel.className = "role";
+      roleLabel.textContent = role === "assistant" ? "Heretic" : role;
+      div.appendChild(roleLabel);
+      const text = document.createElement("div");
+      text.textContent = content;
+      div.appendChild(text);
+      chatEl.appendChild(div);
+      chatEl.scrollTop = chatEl.scrollHeight;
+      return text;
+    }
+
+    async function send() {
+      const content = inputEl.value.trim();
+      if (!content || generating) return;
+
+      generating = true;
+      sendBtn.disabled = true;
+      inputEl.value = "";
+      inputEl.style.height = "auto";
+
+      // Add system prompt if set and first message
+      const sysPrompt = document.getElementById("system-prompt").value.trim();
+      if (sysPrompt && !messages.some(m => m.role === "system")) {
+        messages.unshift({ role: "system", content: sysPrompt });
+        addMessage("system", sysPrompt);
+      }
+
+      messages.push({ role: "user", content });
+      addMessage("user", content);
+
+      const typingEl = document.createElement("div");
+      typingEl.className = "typing";
+      typingEl.textContent = "Generating";
+      chatEl.appendChild(typingEl);
+      chatEl.scrollTop = chatEl.scrollHeight;
+
+      try {
+        const temp = parseFloat(document.getElementById("temperature").value) || 0.7;
+        const maxTok = parseInt(document.getElementById("max-tokens").value) || 2048;
+
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages, temperature: temp, max_tokens: maxTok }),
+        });
+
+        typingEl.remove();
+
+        const textEl = addMessage("assistant", "");
+        let fullResponse = "";
+
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6);
+            if (data === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.error) {
+                fullResponse += `[Error: ${parsed.error}]`;
+              } else {
+                const delta = parsed.choices?.[0]?.delta?.content || "";
+                fullResponse += delta;
+              }
+              textEl.textContent = fullResponse;
+              chatEl.scrollTop = chatEl.scrollHeight;
+            } catch {}
+          }
+        }
+
+        // If no streaming happened, try parsing as regular JSON
+        if (!fullResponse) {
+          try {
+            const text = await res.text();
+            const json = JSON.parse(text);
+            fullResponse = json.choices?.[0]?.message?.content || text;
+            textEl.textContent = fullResponse;
+          } catch {}
+        }
+
+        messages.push({ role: "assistant", content: fullResponse });
+      } catch (err) {
+        typingEl.remove();
+        addMessage("assistant", `[Error: ${err.message}]`);
+      }
+
+      generating = false;
+      sendBtn.disabled = false;
+      inputEl.focus();
+    }
+
+    function clearChat() {
+      messages = [];
+      chatEl.innerHTML = "";
+    }
+
+    function exportChat() {
+      const text = messages.map(m => `[${m.role}]\n${m.content}`).join("\n\n---\n\n");
+      const blob = new Blob([text], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `heretic-chat-${new Date().toISOString().slice(0,16)}.txt`;
+      a.click();
+    }
+
+    inputEl.focus();
+  </script>
+</body>
+</html>
